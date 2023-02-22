@@ -40,13 +40,17 @@ class JAYA_FJSP():
         self.machine_prejob={'M1':"j0", 'M2':"j0",'M3':"j0", 'M4':"j0",'M5':"j0", 'M6':"j0",'M7':"j0", 'M8':"j0"}
         self.job_preOperation={'1':1,'2':1,'3':1,'4':1,'5':1,'6':1,'7':1,'8':1,'9':1,'10':1, '11':1, '12':1}
         self.job_max_op = {'1':4, '2':4, '3':4, '4':4, '5':4, '6':4, '7':4, '8':4, '9':4, '10':4, '11':4, '12':4}
-        
+        self.s = [0 for x in range(48)]
+        self.k = 0
+        self.assignment = []
     def reset(self):
         self.job_endTime={'j1':0, 'j2':0, 'j3':0, 'j4':0, 'j5':0, 'j6':0,'j7':0, 'j8':0, 'j9':0, 'j10':0, 'j11':0, 'j12':0} # job의 끝나는 지점을 등록
         self.machine_endTime={'M1':0,'M2':0,'M3':0,'M4':0} # machine의 끝나는 지점을 등록
         self.machine_prejob={'M1':"j0", 'M2':"j0",'M3':"j0", 'M4':"j0",'M5':"j0", 'M6':"j0",'M7':"j0", 'M8':"j0"}
         self.job_preOperation={'1':1,'2':1,'3':1,'4':1,'5':1,'6':1,'7':1,'8':1,'9':1,'10':1, '11':1, '12':1}
-    
+        self.s = [0 for x in range(48)]
+        self.k = 0
+        self.assignment = []
     def operation_check(self, job_type):
         if job_type < 10:
             job = "j0"+str(job_type)
@@ -62,7 +66,6 @@ class JAYA_FJSP():
     def gannt_chart(self, population):
         assignment = []
         for j in range(48):
-            machine = population[1][j]
             assignment.append([population[0][j],population[1][j]])
         print(assignment)
         
@@ -71,6 +74,7 @@ class JAYA_FJSP():
         j=0
         for job_num,machine in assignment:  #['j11','M2']의 형태에서 잡과 머신을 가져옴
             job = 'j'+str(job_num)        #'j11'의 형태를 j1로 
+            machine = "M"+str(machine)
             job_op = self.operation_check(job_num)
             self.job_preOperation[str(job_num)] += 1
             df2_sorted = self.s_table[job] #셋업테이블에서 job에 해당하는 컬럼을 가져옴
@@ -96,13 +100,98 @@ class JAYA_FJSP():
         plotlydf2 = plotlydf.sort_values(by=['Resource','Task'], ascending=False)
         fig = px.timeline(plotlydf2, x_start="Start", x_end="Finish", y="Resource", color="Task", width=1000, height=400)
         fig.show()
-    
+    def sco(self, dad, mom):
+        dad_ch = copy.deepcopy(dad)
+        mom_ch = copy.deepcopy(mom)
+        point = random.randint(0,47)
+        os_offspring = [-1 for i in range(48)]
+        for i in range(point):
+            os_offspring[i] = dad_ch[0][i]
+            mom_ch[0].remove(os_offspring[i])
+        for i in range(48):
+            if os_offspring[i] == -1:
+                os_offspring[i] = mom_ch[0].pop(0)
+        ma_offspring = self.init_MA_LS(os_offspring)
+        c_max, critical_machine, flow_time, util = self.get_fittness(os_offspring, ma_offspring)
+        offspring = [os_offspring, ma_offspring, c_max, critical_machine, flow_time, util ]
+        return offspring
+    def jco(self, dad, mom):
+        dad_ch = copy.deepcopy(dad)
+        mom_ch = copy.deepcopy(mom)
+        job_list = [x for x in range(1,13)]
+        for i in range(1,13):
+            coin = random.random()
+            if coin >0.5:
+                job_list.remove(i)
+        os_offspring = [-1 for i in range(48)]
+        for i in range(48):
+            if dad_ch[0][i] in job_list:
+                os_offspring[i] = dad_ch[0][i]
+                mom_ch[0].remove(dad_ch[0][i])
+        for i in range(48):
+            if os_offspring[i] == -1:
+                os_offspring[i] = mom_ch[0].pop(0)
+        ma_offspring = self.init_MA_LS(os_offspring)
+        c_max, critical_machine, flow_time, util = self.get_fittness(os_offspring, ma_offspring)
+        offspring = [os_offspring, ma_offspring, c_max, critical_machine, flow_time, util ]
+        return offspring
+    def aco(self, dad, mom):
+        dad_ch = copy.deepcopy(dad)
+        mom_ch = copy.deepcopy(mom)
+        os_offspring = copy.deepcopy(dad_ch[0])
+        ma_offspring = [-1 for i in range(48)]
+        for i in range(48):
+            for j in range(48):
+               if os_offspring[i] == mom_ch[0][j]:
+                   mom_ch[0][j] = 0
+                   ma_offspring[i] = mom_ch[1][j]
+                   break
+        c_max, critical_machine, flow_time, util = self.get_fittness(os_offspring, ma_offspring)
+        offspring = [os_offspring, ma_offspring, c_max, critical_machine, flow_time, util ]
+        return offspring
     def get_fittness(self,scheduling_seq,routing_seq):
         time_list=[]
         p_time_list = []
         for j in range(48):
             job_number = scheduling_seq[j]
             machine = routing_seq[j]
+            job = "j"+str(job_number)
+            jobOp = self.operation_check(job_number)
+            self.job_preOperation[str(job_number)] += 1
+            
+            setup_list = self.s_table[job]
+            setup_time=setup_list.loc[self.machine_prejob[machine]]
+            start_time = max(self.machine_endTime[machine] ,self.job_endTime[job])
+            p_list = self.p_table[machine]
+            p_time = p_list.loc[jobOp]
+            p_time_list.append(p_time)
+            end_time = start_time +setup_time+p_time
+            time_list.append([start_time,end_time])
+            self.machine_endTime[machine]=end_time #기계의 끝나는 시간 설정
+            self.job_endTime[job]=end_time #job의 끝나는 시간 설정
+            self.machine_prejob[machine] = job #현재 어떤 machine에서 어떤 job을 수행했는지 기록
+        all_values = self.machine_endTime.values()
+        all_values2 = self.job_endTime.values()
+        all_time = sum(all_values)
+        flow_time = sum(all_values2)
+        value_add_time = sum(p_time_list)
+        util = value_add_time / all_time
+        c_max=max(all_values)
+        all_values = list(all_values)
+        k=0
+        critical_machine=""
+        for i in range(4):
+            if all_values[i] > k:
+                k=all_values[i]
+                critical_machine = str(i+1)
+        return c_max, critical_machine, flow_time, util
+    def get_fittness2(self,scheduling_seq,routing_seq):
+        time_list=[]
+        p_time_list = []
+        for j in range(48):
+            job_number = scheduling_seq[j]
+            machine = routing_seq[j]
+            machine = "M"+str(machine)
             job = "j"+str(job_number)
             jobOp = self.operation_check(job_number)
             self.job_preOperation[str(job_number)] += 1
@@ -163,66 +252,32 @@ class JAYA_FJSP():
             routing_seq.append(machine)
         self.reset()
         return routing_seq
-    def Local_Machine_Routing(self, scheduling_seq, routing_seq ,f_routing_seq, job): #이게 local 초기화
-        routing_seq2=[]
-        job_list = []
-        f = f_routing_seq[job-1]
-        for i in range(len(f_routing_seq)):
-            if f_routing_seq[i] == f:
-                job_list.append(i+1)
-        for i in range(len(scheduling_seq)):
-            operation = scheduling_seq[i]
-            operation2 = "j" + str(operation) + str(self.job_preOperation[str(operation)])
-            self.job_preOperation[str(operation)] += 1
-            if operation not in job_list:
-                machine = routing_seq[i]
-                time = max(self.machine_endTime[machine] ,self.job_endTime["j"+str(job)])
-                df_sorted = self.p_table[machine]
-                p_time = df_sorted.loc[operation2]
-                df2_sorted = self.s_table[operation2[:2]]
-                setup_time=df2_sorted.loc[self.machine_prejob[machine]]
-                start = time
-                end = start+setup_time+p_time
-                self.machine_endTime[machine]=end #기계의 끝나는 시간 설정
-                self.job_endTime[job]=end #job의 끝나는 시간 설정
-                self.machine_prejob[machine] = "j"+str(job) #현재 어떤 machine에서 어떤 job을 수행했는지 기록
+    def AAM(self, offspring): #local하게 좋은 
+        coin = random.randint(1, 1)
+        scheduling_seq ,routing_seq, fittness, critical_machine, flow_time, util = offspring
+        if coin == 1:
+            routing_seq2 = copy.deepcopy(routing_seq)
+            critical_machine_index = []
+            machine = "M"+str(critical_machine)#과부하 걸린 기계
+            for i in range(48): #과부하 걸린 기계의 순서를 저장해놓음
+                if machine == routing_seq[i]:
+                    critical_machine_index.append(i) #[1,13,20,21,24,30,38]
+            random.shuffle(critical_machine_index)   
+            job = scheduling_seq[critical_machine_index[0]] # 24의 7이었음
+            k=0
+            for i in range(critical_machine_index[0]+1): #24까지 돌면서 7이 몇번나오나
+                if job == scheduling_seq[i]:
+                    k+=1
+            if job>9:
+                job_op = "j"+str(job)+"0"+str(k) #72
             else:
-                machine = self.least_time_machine(operation,operation2,f_routing_seq)
-            routing_seq2.append(machine)
-        self.reset()
-        return routing_seq2
-    def Local_Machine_Routing_Swap(self, scheduling_seq, routing_seq ,f_routing_seq, job, job2): #이건 factory swap 떄문에
-        routing_seq2=[]
-        job_list = []
-        f = f_routing_seq[job-1]
-        f2 = f_routing_seq[job2-1]
-        for i in range(len(f_routing_seq)):
-            if f_routing_seq[i] == f2:
-                job_list.append(i+1)
-        for i in range(len(f_routing_seq)):
-            if f_routing_seq[i] == f:
-                job_list.append(i+1)
-        for i in range(len(scheduling_seq)):
-            operation = scheduling_seq[i]
-            operation2 = "j" + str(operation) + str(self.job_preOperation[str(operation)])
-            self.job_preOperation[str(operation)] += 1
-            if operation not in job_list:
-                machine = routing_seq[i]
-                time = max(self.machine_endTime[machine] ,self.job_endTime["j"+str(job)])
-                df_sorted = self.p_table[machine]
-                p_time = df_sorted.loc[operation2]
-                df2_sorted = self.s_table[operation2[:2]]
-                setup_time=df2_sorted.loc[self.machine_prejob[machine]]
-                start = time
-                end = start+setup_time+p_time
-                self.machine_endTime[machine]=end #기계의 끝나는 시간 설정
-                self.job_endTime[job]=end #job의 끝나는 시간 설정
-                self.machine_prejob[machine] = "j"+str(job) #현재 어떤 machine에서 어떤 job을 수행했는지 기록
-            else:
-                machine = self.least_time_machine(operation,operation2,f_routing_seq)
-            routing_seq2.append(machine)
-        self.reset()
-        return routing_seq2
+                job_op = "j0"+str(job)+"0"+str(k) #72
+            machine = self.random_machine(job, job_op)
+            routing_seq2[critical_machine_index[0]] = machine
+            self.reset()
+            fittness, critical_machine, flow_time, util = self.get_fittness(scheduling_seq, routing_seq2)
+            solution = [scheduling_seq, routing_seq2, fittness, critical_machine,flow_time,util]
+        return solution
     def least_time_machine(self, job,operation2): #그 시점에서 가장 작은 machine 선택해주는거
         best_machine = ""
         max_endTime=10000
@@ -242,7 +297,15 @@ class JAYA_FJSP():
         self.job_endTime[job]=max_endTime #job의 끝나는 시간 설정
         self.machine_prejob[best_machine] = "j"+str(job) #현재 어떤 machine에서 어떤 job을 수행했는지 기록
         return best_machine
-    
+    def random_machine(self, job,operation2): #그 시점에서 가장 작은 machine 선택해주는거
+        random_machine_list = []
+        for i in self.machine_endTime:
+            df_sorted = self.p_table[i]
+            p_time = df_sorted.loc[operation2]
+            if p_time != 0:
+                random_machine_list.append(i)
+        random.shuffle(random_machine_list)
+        return random_machine_list[0]
     def Two_Point_OS_LS(self, solution): #LS 세가지
         coin = random.randint(0,2)
         scheduling_seq, routing_seq, fittness, critical_machine, flow_time, util = solution
@@ -309,139 +372,56 @@ class JAYA_FJSP():
             c_max, critical_machine2,flow_time, util = self.get_fittness(s_v, r_v)
             solution = [s_v ,r_v, c_max, critical_machine2, flow_time, util]
             return solution
-    def MOX_operator(self,dad_ch2, mom_ch2): #유일한 교차연산
-        mom_ch = copy.deepcopy(mom_ch2)
-        dad_ch = copy.deepcopy(dad_ch2)
-        point1 = random.randint(0, 47)
-        point2 = random.randint(point1, 48)
-        dad_list = []
-        offspring = [-1 for i in range(48)]
-        offspring2 = [-1 for i in range(48)]
-        for i in range(point1,point2): #리스트를 뽑아
-            dad_list.append(dad_ch[0][i])
-        for i in range(len(dad_list)): # 인덱싱을 찾아서 -1로 바꿔줘
-            for j in range(len(mom_ch[0])):
-                if mom_ch[0][j] == dad_list[i]:
-                    mom_ch[0][j] = -1
-                    break
-        for i in dad_list: #그 인덱싱에다가 집어넣어
-            for j in range(48):
-                if mom_ch[0][j] == -1:
-                    offspring[j] = i
-                    mom_ch[0][j] = 0
-                    break
-        for i in range(48): # 나머지를 엄마에서 집어넣어
-            if offspring[i] == -1:
-                offspring[i] = mom_ch[0][i]
-        for i in range(48): # 여기는 할당 따라가기
-            for j in range(48):
-                if offspring[i] == dad_ch[0][j]:
-                    offspring2[i] = dad_ch[1][j]
-                    dad_ch[0][j] = -1
-                    break
-        c_max, critical_machine, flow_time, util = self.get_fittness(offspring, offspring2)
-        self.reset()
-        off_cho = [offspring, offspring2, c_max, critical_machine, flow_time, util]
-        return off_cho
-        
-    
-    def SPT_MA_LS(self, offspring): # 과부화 걸린 기계에서 p_time이 짧은거로 바꿈
-        coin = random.randint(1, 1)
-        scheduling_seq ,factory_seq ,routing_seq, fittness, critical_machine, critical_operation = offspring
-        if coin == 1:
-            critical_machine_index = []
-            random.shuffle(critical_operation)
-            factory = self.machine_factory(critical_machine)    
-            stop = False
-            for i in critical_machine_index:
-                k=0
-                for j in range(i+1):
-                    if scheduling_seq[j] == scheduling_seq[i]:
-                        k+=1
-                job_op = 'j'+str(scheduling_seq[i])+str(k)
-                machine = routing_seq[i]
-                for j in self.job_of_factory[factory]:
-                    if j != machine and self.p_table[j].loc[job_op] < self.p_table[machine].loc[job_op] and self.p_table[j].loc[job_op] != 0 :
-                        routing_seq[i] = j
-                        stop = True
-                if stop:
-                    break
-            fittness, critical_machine,critical_operation = self.get_fittness(scheduling_seq, routing_seq)
-            self.reset()
-            solution = [scheduling_seq, factory_seq, routing_seq, fittness, critical_machine,critical_operation]
-        return solution
-    def Global_MA_LS(self, offspring): #끝까지 갔을 때 성능ㅇ 좋으면 변경
-        coin = random.randint(1, 1)
-        scheduling_seq ,factory_seq ,routing_seq, fittness, critical_machine, critical_operation = offspring
-        if coin == 1:
-            routing_seq2 = copy.deepcopy(routing_seq)
-            machine = "M"+str(critical_machine)
-            random.shuffle(critical_operation)
-            factory = self.machine_factory(critical_machine)
-            job = scheduling_seq[critical_operation[0]]
-            k=0
-            for i in range(critical_operation[0]+1):
-                if job == scheduling_seq[i]:
-                    k+=1
-            job_op = "j"+str(job)+str(k)
-            best_fittness = 10000
-            best_routing = copy.deepcopy(routing_seq)
-            for j in self.job_of_factory[factory]:
-                if j != machine and self.p_table[j].loc[job_op] != 0 : 
-                    routing_seq2[critical_operation[0]] = j
-                    fittness2, critical_machine2,critical_operation2 = self.get_fittness(scheduling_seq, routing_seq2)
-                    if fittness2 < best_fittness:
-                        best_fittness = fittness2
-                        best_routing = copy.deepcopy(routing_seq2)
-            if best_fittness == 10000:
-                solution = [scheduling_seq, factory_seq, routing_seq, fittness, critical_machine,critical_operation]
-            else:
-                fittness, critical_machine,critical_operation = self.get_fittness(scheduling_seq, best_routing)
-                self.reset()
-                solution = [scheduling_seq, factory_seq, routing_seq, fittness, critical_machine,critical_operation]
-        return solution
-    def Local_MA_LS(self, offspring): #local하게 좋은 
-        coin = random.randint(1, 1)
-        scheduling_seq ,routing_seq, fittness, critical_machine, flow_time, util = offspring
-        if coin == 1:
-            routing_seq2 = copy.deepcopy(routing_seq)
-            critical_machine_index = []
-            machine = "M"+str(critical_machine)#과부하 걸린 기계
-            for i in range(48): #과부하 걸린 기계의 순서를 저장해놓음
-                if machine == routing_seq[i]:
-                    critical_machine_index.append(i) #[1,13,20,21,24,30,38]
-            random.shuffle(critical_machine_index)
-            job = scheduling_seq[critical_machine_index[0]] # 24의 7이었음
-            k=0
-            for i in range(critical_machine_index[0]+1): #24까지 돌면서 7이 몇번나오나
-                if job == scheduling_seq[i]:
-                    k+=1
-            if job<10:
-                job2 = "j0"+str(job)
-            else:
-                job2 = "j"+str(job)
-            job_op = job2 + "0" +str(k) #72
-            for i in range(critical_machine_index[0]):
-                operation = scheduling_seq[i]
-                operation2 = self.operation_check(operation)
-                self.job_preOperation[str(operation)] += 1
-                machine = routing_seq[i]
-                time = max(self.machine_endTime[machine] ,self.job_endTime["j"+str(job)])
-                df_sorted = self.p_table[machine]
-                p_time = df_sorted.loc[operation2]
-                df2_sorted = self.s_table["j"+str(job)]
-                setup_time=df2_sorted.loc[self.machine_prejob[machine]]
-                start = time
-                end = start+setup_time+p_time
-                self.machine_endTime[machine]=end #기계의 끝나는 시간 설정
-                self.job_endTime[job]=end #job의 끝나는 시간 설정
-                self.machine_prejob[machine] = "j"+str(job) #현재 어떤 machine에서 어떤 job을 수행했는지 기록
-            machine = self.least_time_machine(job, job_op)
-            routing_seq2[critical_machine_index[0]] = machine
-            self.reset()
-            fittness, critical_machine, flow_time, util = self.get_fittness(scheduling_seq, routing_seq2)
-            solution = [scheduling_seq, routing_seq2, fittness, critical_machine, flow_time, util]
-        return solution
+    def step(self, a):
+        machine = a+1
+        self.s[self.k] = machine
+        reward = self.return_reward()
+        done = self.is_done()
+        self.k+=1
+        return self.s, reward, done
+    def is_done(self):
+        done = False
+        if self.s[len(self.s)-1] == 0:
+            done = False
+        else:
+            done = True
+        return done
+    def return_reward(self):
+        job_num = self.assignment[self.k]
+        machine = "M"+str(self.s[self.k])         #'j11'의 형태를 j1로
+        job = 'j'+str(job_num)        #'j11'의 형태를 j1로 
+        job_op = self.operation_check(job_num)
+        self.job_preOperation[str(job_num)] += 1
+        df2_sorted = self.s_table[job] #셋업테이블에서 job에 해당하는 컬럼을 가져옴
+        setup_time=df2_sorted.loc[self.machine_prejob[machine]] #컬럼에서 machine에 세팅되어있던 job에서 변경유무 확인
+        last_work_finish_time = self.machine_endTime[machine]
+        time = max(self.machine_endTime[machine] ,self.job_endTime[job]) #machine과 job의 순서 제약조건을 지키기 위해 더 큰 값을 설정함
+        df_sorted = self.p_table[machine] #p_time테이블에서 현재 machine에 해당하는 열을 가져옴
+        p_time = df_sorted.loc[job_op] #해당하는 job과 operation의 시간을 가져옴
+        start = datetime.fromtimestamp(time*3600) #포매팅 해줌
+        time = time+setup_time # 프로세스타임과 셋업타임을 더해줌
+        p_start=datetime.fromtimestamp(time*3600)
+        time = time+p_time
+        end = datetime.fromtimestamp(time*3600) #끝나는 시간 포매팅
+        self.machine_endTime[machine]=time #기계의 끝나는 시간 설정
+        self.job_endTime[job]=time #job의 끝나는 시간 설정
+        self.machine_prejob[machine] = job #현재 어떤 machine에서 어떤 job을 수행했는지 기록
+        reward = 30-p_time
+        return reward
+    def random_action(self):
+        #인덱스는 self.k
+        random_machine_list = []
+        job = self.assignment[self.k]
+        jop = self.operation_check(job)
+        for i in self.machine_endTime:
+            df_sorted = self.p_table[i]
+            p_time = df_sorted.loc[jop]
+            if p_time != 0:
+                random_machine_list.append(i)
+        random.shuffle(random_machine_list)
+        random_machine = random_machine_list[0]
+        random_action = int(random_machine[1])-1
+        return random_action
     def replacement_operator2(self, population, offsprings):
         result_population = population[:]
         for i in range(5):
@@ -523,10 +503,7 @@ class JAYA_FJSP():
         all_list = []                    
         for i in range(100):
             scheduling_seq = self.init_OS()
-            if i < 70:
-                routing_seq_m = self.init_MA_Random(scheduling_seq)
-            else:
-                routing_seq_m = self.init_MA_LS(scheduling_seq)
+            routing_seq_m = self.init_MA_LS(scheduling_seq)
             self.reset()
             fittness,critical_machine,flow_time,util = self.get_fittness(scheduling_seq,routing_seq_m)
             self.reset()
@@ -538,20 +515,40 @@ class JAYA_FJSP():
             count_end=0 #동일 갯수
             for i in range(5):
                 mom_ch, dad_ch = self.selection_operater(population)
-                offspring = self.MOX_operator(dad_ch, mom_ch)
                 self.reset()
-                coin = random.random()
-                if coin < 0.9:
-                    solution = self.Local_MA_LS(offspring)
+                coin = random.randint(0,1)
+                if coin == 0 :
+                    offspring = self.sco(dad_ch, mom_ch)
+                    self.reset()
+                elif coin == 1:
+                    offspring = self.jco(dad_ch, mom_ch)
+                    self.reset()
+                coin2 = random.random()
+                if coin2 < 0.15:
+                    offspring = self.Two_Point_OS_LS(offspring)
+                offsprings.append(offspring)
+            population = self.replacement_operator(population, offsprings)
+            self.reset()
+            population = self.sort_population(population)
+            for i in range(5):
+                mom_ch, dad_ch = self.selection_operater(population)
+                self.reset()
+                coin = random.randint(0,2)
+                if coin == 0 :
+                    offspring = self.sco(dad_ch, mom_ch)
+                    self.reset()
+                elif coin == 1:
+                    offspring = self.jco(dad_ch, mom_ch)
                     self.reset()
                 else:
-                    solution = self.Two_Point_OS_LS(offspring)
+                    offspring = self.aco(dad_ch, mom_ch)
                     self.reset()
-                offsprings.append(solution)
-            if generation < 0:
-                population = self.replacement_operator2(population, offsprings)
-            else:
-                population = self.replacement_operator(population, offsprings)
+                coin2 = random.random()
+                if coin2 < 0.15:
+                    offspring = self.Two_Point_OS_LS(offspring)
+                elif 0.15< coin2 <0.25:
+                    offspring = self.AAM(offspring)
+            population = self.replacement_operator(population, offsprings)
             self.reset()
             population = self.sort_population(population)
             print('현재 세대',generation, '최고 해', population[0][2])
@@ -576,30 +573,3 @@ class JAYA_FJSP():
                 break
         
         return population, result
-total_makespan=0
-solution_list = []
-makespan_list = []
-util_list = []
-flow_time_list = []
-starttime = datetime.now()
-for i in range(20):
-    if __name__ == "__main__":
-        jaya = JAYA_FJSP(params)
-        population,result = jaya.search()
-        print(population[0])
-        jaya.gannt_chart(population[0])
-        total_makespan += population[0][2]
-        makespan_list.append(population[0][2])
-        util_list.append(population[0][5])
-        flow_time_list.append(population[0][4])
-        solution_list.append([population[0][2],population[0][4],population[0][5]])
-endtime = datetime.now()
-elapsed_time = endtime-starttime
-total_elapsed_time = 0
-total_elapsed_time += elapsed_time.total_seconds()
-print(solution_list)
-print("100회 실행 평균 최적 makespan: ", total_makespan/20)
-print("100회 평균 총 걸린시간: ", total_elapsed_time/20)
-print("5회 최소값", min(makespan_list))
-print("5회 최댓값", max(makespan_list))
-
